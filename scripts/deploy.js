@@ -40,12 +40,6 @@ async function main() {
   }
   console.log(`\n   Nonce found: ${nonce}`);
   
-  console.log("3. Advancing 5 blocks...");
-  for (let i = 0; i < 5; i++) {
-    await ethers.provider.send("evm_mine", []);
-  }
-  console.log("   Block:", await ethers.provider.getBlockNumber());
-  
   console.log("4. commitData...");
   const tx2 = await nexus.commitData(slot, data, ethers.ZeroHash, nonce, secret, secretNonce);
   await tx2.wait();
