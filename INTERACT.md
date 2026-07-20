@@ -8,6 +8,8 @@
 
 ## Flow
 
+Der erste erfolgreiche Writer eines Slots wird dessen Slot-Writer. Nur diese Adresse darf den belegten Slot später aktualisieren, löschen oder destruktiv mit `selfHeal` bearbeiten. Es existiert keine globale Owner- oder Admin-Rolle.
+
 ### 1. Präsenz anmelden
 
 ```javascript
@@ -60,6 +62,11 @@ const wl = await nexus.verifyWaterline(1);
 console.log("Hash:", wl[0]);
 console.log("Chunks:", wl[1].toString());
 console.log("Timestamp:", wl[2].toString());
+console.log("Last block:", wl[3].toString());
+
+const metadata = await nexus.getSlotMetadata(1);
+console.log("Original length:", metadata[0].toString());
+console.log("Slot writer:", metadata[1]);
 ```
 
 5. Integrität prüfen
@@ -76,4 +83,6 @@ Fehler	Ursache	Lösung
 "Presence delay not met"	Zu früh commitData	5 Blöcke warten	
 "Insufficient effort"	Nonce ungültig	Nonce neu minen	
 "Invalid state proof"	falscher previousHash	Aktuellen Hash aus verifyWaterline holen	
-"Rate limit"	Zu schnell wiederholt	10 Blöcke warten	
+"Rate limit"	Zu schnell wiederholt	10 Blöcke warten
+"Not slot writer"	Fremder Account versucht Update/Löschung	Den ursprünglichen Slot-Writer verwenden
+"Active presence commit"	Unverbrauchter Presence-Commit existiert	Diesen Commit zuerst gültig verbrauchen

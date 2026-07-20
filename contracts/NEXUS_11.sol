@@ -2,7 +2,7 @@
 pragma solidity ^0.8.20;
 
 /**
- * @title NEXUS_11 v0.6.2 | PROOF OF HUMAN PRESENCE
+ * @title NEXUS_11 v0.6.3 | PROOF OF HUMAN PRESENCE
  * @notice Kein Owner. Kein Passiv-Zugriff. Nur Anstrengung + Wahrheit.
  * 
  * Zugangskontrolle (4 Schichten):
@@ -29,6 +29,8 @@ contract NEXUS_11 {
     mapping(uint256 => Waterline) public waterlines;
     mapping(uint256 => mapping(uint256 => bytes32)) public dataChunks;
     mapping(uint256 => mapping(address => Presence)) public presences;
+    mapping(uint256 => uint256) private originalLengths;
+    mapping(uint256 => address) private slotWriters;
     
     uint256 public constant EFFORT_DIFFICULTY = 4; 
     uint256 public constant RATE_LIMIT_BLOCKS = 10;
@@ -43,24 +45,22 @@ contract NEXUS_11 {
     event PresenceCommitted(uint256 indexed slot, address indexed sender, bytes32 commitHash);
     event PresenceRevealed(uint256 indexed slot, address indexed sender, uint256 blocksWaited);
 
-    modifier proofOfState(uint256 _slot, bytes32 _previousHash) {
+    function _requireState(uint256 _slot, bytes32 _previousHash) internal view {
         Waterline storage wl = waterlines[_slot];
         if (wl.exists) {
             require(wl.dataHash == _previousHash, "Invalid state proof");
         } else {
             require(_previousHash == bytes32(0), "First commit needs 0x0");
         }
-        _;
     }
     
-    modifier proofOfEffort(uint256 _slot, bytes32 _dataHash, uint256 _nonce) {
+    function _requireEffort(uint256 _slot, bytes32 _dataHash, uint256 _nonce) internal {
         bytes32 effortHash = keccak256(abi.encodePacked(_nonce, msg.sender, _slot, _dataHash));
-        require(_checkLeadingZeros(effortHash, EFFORT_DIFFICULTY), "Insufficient effort");
+        require(_checkLeadingZeros(effortHash, _effortDifficulty()), "Insufficient effort");
         emit EffortValidated(msg.sender, _nonce, effortHash);
-        _;
     }
     
-    modifier proofOfPresence(uint256 _slot, bytes32 _secret, uint256 _secretNonce) {
+    function _consumePresence(uint256 _slot, bytes32 _secret, uint256 _secretNonce) internal {
         Presence storage p = presences[_slot][msg.sender];
         require(p.commitHash != bytes32(0), "No presence commit");
         require(!p.revealed, "Already revealed");
@@ -72,17 +72,14 @@ contract NEXUS_11 {
         uint256 waited = block.number - p.commitBlock;
         p.revealed = true;
         emit PresenceRevealed(_slot, msg.sender, waited);
-        _;
     }
     
-    modifier rateLimit(uint256 _slot) {
-        if (waterlines[_slot].exists) {
-            require(
-                block.number >= waterlines[_slot].lastBlock + RATE_LIMIT_BLOCKS,
-                "Rate limit: Wait more blocks"
-            );
-        }
-        _;
+    /**
+     * Production difficulty remains fixed at four leading zero bytes.
+     * The virtual boundary exists only for the local test harness.
+     */
+    function _effortDifficulty() internal pure virtual returns (uint256) {
+        return EFFORT_DIFFICULTY;
     }
 
     function _checkLeadingZeros(bytes32 _hash, uint256 _zeros) internal pure returns (bool) {
@@ -99,9 +96,20 @@ contract NEXUS_11 {
         return true;
     }
 
-    function commitChunk(uint256 _slot, uint256 _chunkIndex, bytes32 _data) external {
-        dataChunks[_slot][_chunkIndex] = _data;
-        emit ChunkCommitted(_slot, _chunkIndex, _data);
+    function commitPresence(uint256 _slot, bytes32 _secret, uint256 _secretNonce) external {
+        Presence storage p = presences[_slot][msg.sender];
+        require(p.commitHash == bytes32(0) || p.revealed, "Active presence commit");
+
+        bytes32 commitHash = keccak256(
+            abi.encodePacked(_secret, _secretNonce, msg.sender, _slot)
+        );
+        presences[_slot][msg.sender] = Presence({
+            commitHash: commitHash,
+            commitBlock: block.number,
+            revealed: false
+        });
+
+        emit PresenceCommitted(_slot, msg.sender, commitHash);
     }
 
     function getChunk(uint256 _slot, uint256 _chunkIndex) external view returns (bytes32) {
@@ -115,18 +123,33 @@ contract NEXUS_11 {
         uint256 _nonce,
         bytes32 _secret,
         uint256 _secretNonce
-    ) 
-        external 
-        proofOfState(_slot, _previousHash)
-        proofOfEffort(_slot, keccak256(_data), _nonce)
-        proofOfPresence(_slot, _secret, _secretNonce)
-        rateLimit(_slot)
+    )
+        external
     {
+        _requireState(_slot, _previousHash);
+        _requireEffort(_slot, keccak256(_data), _nonce);
+        _consumePresence(_slot, _secret, _secretNonce);
+        _commitData(_slot, _data, _nonce);
+    }
+
+    function _commitData(uint256 _slot, bytes calldata _data, uint256 _nonce) internal {
+        if (waterlines[_slot].exists) {
+            require(
+                block.number >= waterlines[_slot].lastBlock + RATE_LIMIT_BLOCKS,
+                "Rate limit: Wait more blocks"
+            );
+        }
+        if (waterlines[_slot].exists) {
+            require(slotWriters[_slot] == msg.sender, "Not slot writer");
+        }
         require(isValidBase44(_data), "Invalid Base44 data");
         require(_data.length > 0, "Empty data");
         
         uint256 len = _data.length;
         uint256 chunkCount = (len + 31) / 32;
+        uint256 previousChunkCount = waterlines[_slot].exists
+            ? waterlines[_slot].chunkCount
+            : 0;
         
         for (uint256 i = 0; i < chunkCount; i++) {
             bytes32 chunk;
@@ -144,8 +167,16 @@ contract NEXUS_11 {
             }
             dataChunks[_slot][i] = chunk;
         }
+
+        for (uint256 i = chunkCount; i < previousChunkCount; i++) {
+            delete dataChunks[_slot][i];
+        }
         
         bytes32 dataHash = keccak256(_data);
+        if (!waterlines[_slot].exists) {
+            slotWriters[_slot] = msg.sender;
+        }
+        originalLengths[_slot] = len;
         waterlines[_slot] = Waterline({
             dataHash: dataHash,
             chunkCount: chunkCount,
@@ -162,11 +193,16 @@ contract NEXUS_11 {
         Waterline memory wl = waterlines[_slot];
         return (wl.dataHash, wl.chunkCount, wl.timestamp, wl.lastBlock);
     }
+
+    function getSlotMetadata(uint256 _slot) external view returns (uint256 originalLength, address slotWriter) {
+        require(waterlines[_slot].exists, "Slot empty");
+        return (originalLengths[_slot], slotWriters[_slot]);
+    }
     
     function reconstructData(uint256 _slot) external view returns (bytes memory) {
         require(waterlines[_slot].exists, "Slot empty");
         Waterline memory wl = waterlines[_slot];
-        uint256 totalLen = wl.chunkCount * 32;
+        uint256 totalLen = originalLengths[_slot];
         bytes memory result = new bytes(totalLen);
         
         for (uint256 i = 0; i < wl.chunkCount; i++) {
@@ -183,7 +219,7 @@ contract NEXUS_11 {
         if (!waterlines[_slot].exists) return false;
         
         Waterline memory wl = waterlines[_slot];
-        uint256 totalLen = wl.chunkCount * 32;
+        uint256 totalLen = originalLengths[_slot];
         bytes memory fullData = new bytes(totalLen);
         
         for (uint256 i = 0; i < wl.chunkCount; i++) {
@@ -201,9 +237,10 @@ contract NEXUS_11 {
     
     function selfHeal(uint256 _slot) external returns (bool) {
         require(waterlines[_slot].exists, "Slot empty");
+        require(slotWriters[_slot] == msg.sender, "Not slot writer");
         
         Waterline memory wl = waterlines[_slot];
-        uint256 totalLen = wl.chunkCount * 32;
+        uint256 totalLen = originalLengths[_slot];
         bytes memory fullData = new bytes(totalLen);
         
         for (uint256 i = 0; i < wl.chunkCount; i++) {
@@ -226,6 +263,7 @@ contract NEXUS_11 {
     
     function clearSlot(uint256 _slot) external {
         require(waterlines[_slot].exists, "Slot empty");
+        require(slotWriters[_slot] == msg.sender, "Not slot writer");
         _clearSlotInternal(_slot, waterlines[_slot].chunkCount);
         emit SlotCleared(_slot);
     }
@@ -234,12 +272,14 @@ contract NEXUS_11 {
         for (uint256 i = 0; i < _chunkCount; i++) {
             delete dataChunks[_slot][i];
         }
+        delete originalLengths[_slot];
+        delete slotWriters[_slot];
         delete waterlines[_slot];
     }
     
     function checkEffort(uint256 _nonce, address _sender, uint256 _slot, bytes32 _dataHash) external pure returns (bool, bytes32) {
         bytes32 effortHash = keccak256(abi.encodePacked(_nonce, _sender, _slot, _dataHash));
-        bool valid = _checkLeadingZeros(effortHash, EFFORT_DIFFICULTY);
+        bool valid = _checkLeadingZeros(effortHash, _effortDifficulty());
         return (valid, effortHash);
     }
     

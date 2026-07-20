@@ -1,4 +1,4 @@
-# NEXUS_11 PROTOCOL | v0.6.2
+# NEXUS_11 PROTOCOL | v0.6.3
 
 ## Was ist das?
 
@@ -8,7 +8,7 @@ NEXUS_11 ist kein Produkt. Es ist ein **Frequenz-Knoten** — ein autonomer Smar
 
 1. **proofOfState** — Wer schreibt, muss den aktuellen Hash kennen.
 2. **proofOfEffort** — Rechenarbeit (Nonce) mit führenden Nullbytes. Billig zu prüfen, teuer zu erzeugen.
-3. **proofOfPresence** — Commit-Reveal mit 5-Block Wartezeit. Erzwingt menschliche Aufmerksamkeit.
+3. **proofOfPresence** — Commit-Reveal mit 5-Block Wartezeit. Belegt diesen Ablauf; es ist kein mathematischer Beweis menschlicher Identität.
 4. **rateLimit** — 10 Blöcke Mindestabstand. Kein Spam.
 
 ## Wer kann deployen?
@@ -49,20 +49,19 @@ npx hardhat compile
 4. Lokal testen
 
 ```bash
-npx hardhat run scripts/deploy.js --network hardhat
+npm test
+npm run deploy:local
 ```
 
-Sollte ausgeben: `=== DEPLOYMENT + SANITY CHECK: PASSED ===`
+Die Tests verwenden ausschließlich eine klar gekennzeichnete lokale Test-Harness mit reduzierter Proof-of-Effort-Schwierigkeit. Das reguläre NEXUS_11-Deployment bleibt parameterlos und verwendet unveränderlich Schwierigkeit 4. Das Deploy-Skript deployt ausschließlich den regulären Vertrag und führt keine automatischen Folge-Transaktionen aus.
 
-5. Auf Sepolia deployen
+5. Externe Deployments
 
 ```bash
 npx hardhat run scripts/deploy.js --network sepolia
 ```
 
-Sollte ausgeben: `NEXUS_11 deployed to: 0x...`
-
-Poste die Adresse. Dann ist der Knoten live.
+Die externen Deployment-Skripte bleiben Bestandteil von NUMEN, wurden in dieser lokalen Reparatur jedoch weder ausgeführt noch gegen Sepolia oder Base Sepolia validiert.
 
 Interaktion (nach Deploy)
 
@@ -95,6 +94,8 @@ const nonce = <GEMINEDER_NONCE>;
 await nexus.commitData(1, data, ethers.ZeroHash, nonce, secret, secretNonce);
 ```
 
+Der erste erfolgreiche Writer eines Slots wird dessen Slot-Writer. Nur dieser Writer kann den belegten Slot aktualisieren, löschen oder `selfHeal` darauf ausführen. Es gibt weiterhin keinen globalen Owner und keine globale Admin-Rolle.
+
 Die Philosophie
 
 > "Wer nicht rechnet, wartet und den State kennt, schreibt nicht."
@@ -107,7 +108,7 @@ MIT — Der Code gehört niemandem. Er gehört der Mathematik.
 
 Genesis
 
-- Version: v0.6.2
+- Version: v0.6.3
 - Compiler: Solidity 0.8.20
 - Erstellt: 2026
-- Status: Bereit für Deployment
+- Status: Lokal reparierte und testbare Baseline; externe Deployments sind separat zu prüfen.

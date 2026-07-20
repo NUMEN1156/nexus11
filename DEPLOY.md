@@ -1,6 +1,6 @@
 # Deployment-Anleitung
 
-## Option A: Hardhat (Empfohlen)
+## Option A: Lokales Hardhat
 
 ### Schritt 1: Node.js installieren
 https://nodejs.org/ (LTS Version)
@@ -42,21 +42,23 @@ Schritt 6: Kompilieren
 npx hardhat compile
 ```
 
-Schritt 7: Test-Deploy (lokal)
+Schritt 7: Lokale Tests und lokales Deployment
 
 ```bash
-npx hardhat run scripts/deploy.js --network hardhat
+npm test
+npm run deploy:local
 ```
 
-Sollte grün durchlaufen.
+Das reguläre NEXUS_11-Deployment bleibt parameterlos und verwendet unveränderlich `EFFORT_DIFFICULTY = 4`. Die Tests verwenden ausschließlich eine klar gekennzeichnete lokale Test-Harness mit Schwierigkeit 1. Das reguläre Deploy-Skript referenziert diese Harness nicht und führt keine automatischen Presence- oder Daten-Transaktionen aus.
 
-Schritt 8: Live-Deploy (Sepolia)
+Schritt 8: Externe Deployments
 
 ```bash
 npx hardhat run scripts/deploy.js --network sepolia
+npx hardhat run scripts/deploy.js --network baseSepolia
 ```
 
-Warte auf Bestätigung. Kopiere die Adresse.
+Diese externen Pfade bleiben Bestandteil von NUMEN. Sie wurden in der lokalen Reparatur weder ausgeführt noch gegen ein Testnet oder Mainnet validiert. Der Vertrag verwendet auch dort fest Schwierigkeit 4.
 
 Schritt 9: Verifizieren (optional)
 
@@ -73,7 +75,7 @@ Option B: Remix (Schnelltest)
 5. Deploy & Run: JavaScript VM
 6. Deploy
 
-Für Live-Deploy: MetaMask auf Sepolia umstellen, dann "Injected Provider" wählen.
+Externe Deployments und Verifikation erfordern eine gesonderte operative Prüfung. Diese Baseline-Reparatur ist keine Produktionsfreigabe.
 
 Option C: Foundry (Alternativ)
 
